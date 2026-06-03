@@ -1,10 +1,10 @@
 {
-  "label": "mais-testes-60",
+  "label": "teste-lento",
   "test_cases": 60,
-  "slow_ms": 0,
+  "slow_ms": 250,
   "force_failure": false,
   "shards": 1,
   "cache_version": "v1",
   "cache_miss_delay_seconds": 6,
-  "notes": "Aumento artificial da quantidade de testes."
+  "notes": "Introducao de testes lentos em parte dos casos."
 }
