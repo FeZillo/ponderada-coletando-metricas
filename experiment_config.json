@@ -1,10 +1,10 @@
 {
-  "label": "cache-invalidado",
+  "label": "cache-v2-aquecido",
   "test_cases": 60,
   "slow_ms": 250,
   "force_failure": false,
   "shards": 1,
   "cache_version": "v2",
   "cache_miss_delay_seconds": 6,
-  "notes": "Mudanca na chave de cache para provocar cache miss."
+  "notes": "Repeticao com cache v2 aquecido."
 }
