@@ -1,10 +1,10 @@
 {
-  "label": "baseline",
+  "label": "baseline-rapido",
   "test_cases": 24,
   "slow_ms": 0,
   "force_failure": false,
   "shards": 1,
   "cache_version": "v1",
   "cache_miss_delay_seconds": 6,
-  "notes": "Baseline com testes rapidos, cache padrao e execucao sequencial."
+  "notes": "Baseline com testes rapidos e execucao sequencial."
 }
