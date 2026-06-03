@@ -1,10 +1,10 @@
 {
-  "label": "cache-aquecido",
+  "label": "falha-controlada",
   "test_cases": 24,
   "slow_ms": 0,
-  "force_failure": false,
+  "force_failure": true,
   "shards": 1,
   "cache_version": "v1",
   "cache_miss_delay_seconds": 6,
-  "notes": "Repeticao do baseline para observar cache hit."
+  "notes": "Introducao de uma falha proposital em teste."
 }
