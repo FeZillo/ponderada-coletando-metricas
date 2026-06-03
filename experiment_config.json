@@ -1,10 +1,10 @@
 {
-  "label": "paralelo-2-shards",
-  "test_cases": 60,
+  "label": "paralelo-3-shards",
+  "test_cases": 90,
   "slow_ms": 250,
   "force_failure": false,
-  "shards": 2,
+  "shards": 3,
   "cache_version": "v2",
   "cache_miss_delay_seconds": 6,
-  "notes": "Divisao dos testes em dois jobs paralelos."
+  "notes": "Carga maior dividida em tres shards paralelos."
 }
