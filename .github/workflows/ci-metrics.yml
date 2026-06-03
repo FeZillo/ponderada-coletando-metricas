@@ -1,0 +1,165 @@
+name: CI Metrics Experiment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  config:
+    name: load experiment config
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.config.outputs.label }}
+      test_cases: ${{ steps.config.outputs.test_cases }}
+      slow_ms: ${{ steps.config.outputs.slow_ms }}
+      force_failure: ${{ steps.config.outputs.force_failure }}
+      shards: ${{ steps.config.outputs.shards }}
+      shard_indexes: ${{ steps.config.outputs.shard_indexes }}
+      cache_version: ${{ steps.config.outputs.cache_version }}
+      cache_miss_delay_seconds: ${{ steps.config.outputs.cache_miss_delay_seconds }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read experiment config
+        id: config
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(Path("experiment_config.json").read_text(encoding="utf-8"))
+          shards = max(int(config.get("shards", 1)), 1)
+          shard_indexes = json.dumps(list(range(shards)))
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as output:
+              output.write(f"label={config.get('label', 'unknown')}\n")
+              output.write(f"test_cases={int(config.get('test_cases', 24))}\n")
+              output.write(f"slow_ms={int(config.get('slow_ms', 0))}\n")
+              output.write(f"force_failure={str(bool(config.get('force_failure', False))).lower()}\n")
+              output.write(f"shards={shards}\n")
+              output.write(f"shard_indexes={shard_indexes}\n")
+              output.write(f"cache_version={config.get('cache_version', 'v1')}\n")
+              output.write(
+                  "cache_miss_delay_seconds="
+                  f"{int(config.get('cache_miss_delay_seconds', 0))}\n"
+              )
+
+      - name: Summarize config
+        run: |
+          {
+            echo "## Experiment config"
+            echo "- Label: ${{ steps.config.outputs.label }}"
+            echo "- Test cases: ${{ steps.config.outputs.test_cases }}"
+            echo "- Slow ms: ${{ steps.config.outputs.slow_ms }}"
+            echo "- Force failure: ${{ steps.config.outputs.force_failure }}"
+            echo "- Shards: ${{ steps.config.outputs.shards }}"
+            echo "- Cache version: ${{ steps.config.outputs.cache_version }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    needs: config
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip packages
+        id: pip-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ needs.config.outputs.cache_version }}-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-${{ needs.config.outputs.cache_version }}-
+
+      - name: Simulate dependency download on cache miss
+        if: steps.pip-cache.outputs.cache-hit != 'true'
+        run: sleep "${{ needs.config.outputs.cache_miss_delay_seconds }}"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Run Ruff
+        run: ruff check .
+
+  tests:
+    name: tests shard ${{ matrix.shard_index }}
+    runs-on: ubuntu-latest
+    needs: config
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: ${{ fromJson(needs.config.outputs.shard_indexes) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip packages
+        id: pip-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ needs.config.outputs.cache_version }}-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-${{ needs.config.outputs.cache_version }}-
+
+      - name: Simulate dependency download on cache miss
+        if: steps.pip-cache.outputs.cache-hit != 'true'
+        run: sleep "${{ needs.config.outputs.cache_miss_delay_seconds }}"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Run Pytest
+        id: pytest
+        continue-on-error: true
+        env:
+          EXPERIMENT_TEST_CASES: ${{ needs.config.outputs.test_cases }}
+          EXPERIMENT_SLOW_MS: ${{ needs.config.outputs.slow_ms }}
+          EXPERIMENT_FORCE_FAILURE: ${{ needs.config.outputs.force_failure }}
+          EXPERIMENT_SHARD_COUNT: ${{ needs.config.outputs.shards }}
+          EXPERIMENT_SHARD_INDEX: ${{ matrix.shard_index }}
+        run: |
+          mkdir -p reports
+          pytest --junitxml "reports/junit-shard-${{ matrix.shard_index }}.xml"
+
+      - name: Extract test metrics
+        if: always()
+        run: |
+          python scripts/extract_test_metrics.py \
+            --junit "reports/junit-shard-${{ matrix.shard_index }}.xml" \
+            --config experiment_config.json \
+            --output reports/pipeline-metrics.json \
+            --shard-index "${{ matrix.shard_index }}" \
+            --shard-count "${{ needs.config.outputs.shards }}"
+
+      - name: Upload test results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-metrics-${{ github.run_id }}-shard-${{ matrix.shard_index }}
+          path: reports/
+          retention-days: 30
+
+      - name: Fail when tests failed
+        if: steps.pytest.outcome == 'failure'
+        run: exit 1
