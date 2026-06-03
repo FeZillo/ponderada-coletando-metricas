@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Leitura Lab</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">API REST + Front simples</p>
+          <h1>Leitura Lab</h1>
+          <p class="subtitle">Acompanhe uma lista curta de livros e avance o status de leitura.</p>
+        </div>
+        <button id="refreshButton" type="button">Atualizar</button>
+      </section>
+
+      <section class="stats" aria-label="Resumo">
+        <div>
+          <span class="label">Total</span>
+          <strong id="totalBooks">0</strong>
+        </div>
+        <div>
+          <span class="label">Concluidos</span>
+          <strong id="doneBooks">0</strong>
+        </div>
+        <div>
+          <span class="label">Progresso</span>
+          <strong id="progress">0%</strong>
+        </div>
+      </section>
+
+      <section>
+        <h2>Livros</h2>
+        <div id="bookList" class="book-list"></div>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
+

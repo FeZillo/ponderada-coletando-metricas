@@ -1,67 +1,125 @@
-# Ponderada: coletando metricas de CI/CD
+# Leitura Lab - experimento de metricas CI/CD
 
-Experimento pratico para instrumentar um pipeline no GitHub Actions, coletar metricas reais de execucao, gerar graficos e produzir uma analise tecnica sobre desempenho, estabilidade e gargalos.
+Projeto simples para instrumentar um pipeline no GitHub Actions, coletar metricas reais
+de execucao, gerar graficos e apoiar um relatorio tecnico.
 
-## Projeto
+O tema escolhido e uma lista de leitura. A API possui somente tres endpoints REST:
 
-O repositorio contem um pequeno pacote Python (`pipeline_lab`) com testes automatizados. O arquivo `experiment_config.json` controla as variacoes do experimento:
+| Metodo | Rota | Descricao |
+| --- | --- | --- |
+| GET | `/api/books` | Lista os livros cadastrados em memoria. |
+| POST | `/api/books/{book_id}/toggle` | Avanca o status do livro. |
+| GET | `/api/stats` | Retorna resumo da lista e percentual concluido. |
 
-- quantidade de testes executados;
-- atraso artificial em parte dos testes;
-- falha controlada;
-- quantidade de shards de teste em paralelo;
-- versao da chave de cache.
-
-## Pipeline
-
-Workflow: [`.github/workflows/ci-metrics.yml`](.github/workflows/ci-metrics.yml)
-
-O pipeline executa:
-
-1. leitura da configuracao do experimento;
-2. instalacao de dependencias;
-3. lint com Ruff;
-4. testes automatizados com Pytest;
-5. upload de artefatos com JUnit XML e metricas dos testes;
-6. coleta posterior via API do GitHub Actions.
-
-## Como reproduzir
-
-Instale as dependencias locais:
+## Como rodar localmente
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
+uvicorn leitura_lab.app:app --reload
 ```
 
-Execute validacoes locais:
+Em outro terminal, suba o front:
+
+```bash
+python -m http.server 5500 -d frontend
+```
+
+Acesse `http://127.0.0.1:5500`.
+
+No Windows PowerShell, a ativacao da venv e:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+## Testes e lint
 
 ```bash
 ruff check .
-pytest
+pytest --junitxml=reports/junit.xml
+python scripts/extract_test_metrics.py reports/junit.xml data/current/test_metrics.json
 ```
 
-Depois de executar o workflow no GitHub Actions pelo menos 12 vezes, colete os dados:
+## Pipeline
+
+O workflow esta em `.github/workflows/ci-metrics.yml` e executa:
+
+- instalacao de dependencias;
+- analise estatica com Ruff;
+- testes automatizados com Pytest;
+- geracao de JUnit XML;
+- extracao de metricas de teste;
+- upload do artefato `pipeline-metrics-<run_id>`.
+
+Os jobs `lint` e `tests` estao paralelos por padrao. Para uma variacao sequencial,
+adicione `needs: lint` no job `tests`, faca commit e rode novamente o pipeline.
+
+## Variacoes sugeridas para 12 execucoes
+
+Use o arquivo `experiment_config.json` para controlar quantidade de testes, teste lento
+e falha controlada. O script abaixo ajuda a trocar o cenario:
 
 ```bash
-python scripts/collect_github_metrics.py --repo FeZillo/ponderada-coletando-metricas --workflow ci-metrics.yml --limit 30
+python scripts/run_experiment.py --list
+python scripts/run_experiment.py --scenario more-tests
 ```
 
-Gere os graficos:
+Plano sugerido:
+
+| Execucoes | Variacao |
+| --- | --- |
+| 1-3 | `baseline`, sem alteracoes. |
+| 4-5 | `more-tests`, com mais testes parametrizados. |
+| 6-7 | `slow-tests`, com atraso artificial. |
+| 8 | `failing-test`, para registrar falha real. |
+| 9 | Voltar para `baseline`, pipeline verde novamente. |
+| 10 | Alterar chave de cache no YAML ou dependencia para medir cache frio. |
+| 11 | Adicionar `needs: lint` em `tests` para testar execucao sequencial. |
+| 12 | Remover `needs: lint` para voltar ao paralelismo. |
+
+Cada alteracao deve virar commit e push para gerar uma execucao real no GitHub Actions.
+
+## Coleta das metricas
+
+Depois das execucoes reais, crie um token com permissao de leitura do repositorio e rode:
 
 ```bash
-python scripts/generate_charts.py --input data/run_summary.csv --jobs data/metrics.csv --steps data/steps.csv --output-dir charts
+export GITHUB_TOKEN="seu_token"
+python scripts/collect_github_metrics.py --repo SEU_USUARIO/ponderada-coletando-metricas --workflow ci-metrics.yml --limit 12
 ```
 
-Atualize o relatorio:
+No PowerShell:
+
+```powershell
+$env:GITHUB_TOKEN="seu_token"
+python scripts/collect_github_metrics.py --repo SEU_USUARIO/ponderada-coletando-metricas --workflow ci-metrics.yml --limit 12
+```
+
+Arquivos gerados:
+
+- `data/metrics.csv`: uma linha por job de cada execucao;
+- `data/run_summary.csv`: uma linha por execucao;
+- `data/steps.csv`: uma linha por etapa;
+- `data/raw_runs.json`: resposta bruta usada na analise.
+
+## Graficos
 
 ```bash
-python scripts/render_report.py --repo FeZillo/ponderada-coletando-metricas
+python scripts/generate_charts.py
 ```
 
-## Entregaveis
+Graficos gerados em `charts/`:
 
-- workflow YAML: `.github/workflows/ci-metrics.yml`
-- script de coleta: `scripts/collect_github_metrics.py`
-- base de dados: `data/*.csv`
-- graficos: `charts/*.png`
-- relatorio tecnico: `docs/relatorio.md`
+- `pipeline_duration_by_run.png`;
+- `average_duration_by_job.png`;
+- `success_failure_rate.png`;
+- `tests_vs_pipeline_duration.png`;
+- `slowest_steps.png`.
+
+## Relatorio
+
+Use `docs/relatorio.md` como base. O relatorio final precisa conter os links das
+execucoes reais, IDs dos workflows, commits usados, graficos gerados e analise critica.
+

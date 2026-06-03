@@ -2,69 +2,80 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
+from xml.etree import ElementTree
 
 
-def parse_junit(path: Path) -> dict[str, float | int]:
-    root = ET.parse(path).getroot()
-    suites = list(root) if root.tag == "testsuites" else [root]
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Extract test metrics from a JUnit XML file.")
+    parser.add_argument("junit_xml", type=Path)
+    parser.add_argument("output_json", type=Path)
+    return parser.parse_args()
 
-    tests = 0
-    failures = 0
-    errors = 0
-    skipped = 0
-    duration = 0.0
 
-    for suite in suites:
-        tests += int(suite.attrib.get("tests", 0))
-        failures += int(suite.attrib.get("failures", 0))
-        errors += int(suite.attrib.get("errors", 0))
-        skipped += int(suite.attrib.get("skipped", 0))
-        duration += float(suite.attrib.get("time", 0.0))
+def load_experiment_config(project_root: Path) -> dict[str, object]:
+    config_path = project_root / "experiment_config.json"
+    if not config_path.exists():
+        return {}
+    return json.loads(config_path.read_text(encoding="utf-8"))
 
-    executed = max(tests - skipped, 0)
-    average = duration / executed if executed else 0.0
+
+def build_empty_metrics(project_root: Path, reason: str) -> dict[str, object]:
+    config = load_experiment_config(project_root)
+    return {
+        "status": "missing",
+        "reason": reason,
+        "test_count": 0,
+        "test_failures": 0,
+        "test_errors": 0,
+        "test_skipped": 0,
+        "test_total_duration": 0.0,
+        "test_average_duration": 0.0,
+        "scenario": config.get("scenario", "unknown"),
+        "variant_note": config.get("variant_note", ""),
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def extract_metrics(junit_xml: Path, project_root: Path) -> dict[str, object]:
+    if not junit_xml.exists():
+        return build_empty_metrics(project_root, "JUnit XML file not found")
+
+    root = ElementTree.parse(junit_xml).getroot()
+    cases = list(root.iter("testcase"))
+    case_times = [float(case.attrib.get("time", 0.0)) for case in cases]
+    failures = sum(1 for case in cases if case.find("failure") is not None)
+    errors = sum(1 for case in cases if case.find("error") is not None)
+    skipped = sum(1 for case in cases if case.find("skipped") is not None)
+    total_duration = round(sum(case_times), 4)
+    test_count = len(cases)
+    average_duration = round(total_duration / test_count, 4) if test_count else 0.0
+    config = load_experiment_config(project_root)
 
     return {
-        "test_count": tests,
+        "status": "collected",
+        "test_count": test_count,
         "test_failures": failures + errors,
+        "test_errors": errors,
         "test_skipped": skipped,
-        "test_duration": round(duration, 4),
-        "test_avg_time": round(average, 6),
+        "test_total_duration": total_duration,
+        "test_average_duration": average_duration,
+        "scenario": config.get("scenario", "unknown"),
+        "variant_note": config.get("variant_note", ""),
+        "generated_at": datetime.now(UTC).isoformat(),
     }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Extract test metrics from a JUnit XML file.")
-    parser.add_argument("--junit", required=True, type=Path)
-    parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--shard-index", type=int, default=0)
-    parser.add_argument("--shard-count", type=int, default=1)
-    args = parser.parse_args()
-
-    metrics = parse_junit(args.junit)
-    config = json.loads(args.config.read_text(encoding="utf-8"))
-
-    payload = {
-        "generated_at": datetime.now(UTC).isoformat(),
-        "run_id": os.getenv("GITHUB_RUN_ID", ""),
-        "run_number": os.getenv("GITHUB_RUN_NUMBER", ""),
-        "job": os.getenv("GITHUB_JOB", ""),
-        "commit_sha": os.getenv("GITHUB_SHA", ""),
-        "ref_name": os.getenv("GITHUB_REF_NAME", ""),
-        "shard_index": args.shard_index,
-        "shard_count": args.shard_count,
-        "experiment": config,
-        **metrics,
-    }
-
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    args = parse_args()
+    project_root = Path.cwd()
+    metrics = extract_metrics(args.junit_xml, project_root)
+    args.output_json.parent.mkdir(parents=True, exist_ok=True)
+    args.output_json.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    print(json.dumps(metrics, indent=2))
 
 
 if __name__ == "__main__":
     main()
+

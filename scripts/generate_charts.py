@@ -1,146 +1,134 @@
 from __future__ import annotations
 
 import argparse
-import csv
-from collections import Counter, defaultdict
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import matplotlib
+import pandas as pd
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
+STATUS_COLORS = {
+    "success": "#2f7d6d",
+    "failure": "#b44d4d",
+    "cancelled": "#7a8496",
+    "skipped": "#b28b2e",
+}
 
 
-def read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate CI/CD metrics charts.")
+    parser.add_argument("--data-dir", type=Path, default=Path("data"))
+    parser.add_argument("--charts-dir", type=Path, default=Path("charts"))
+    return parser.parse_args()
 
 
-def as_float(value: str) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+def read_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
 
 
-def short_sha(value: str) -> str:
-    return value[:7] if value else ""
+def save_figure(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(path, dpi=160)
+    plt.close()
+    print(f"Saved {path}")
 
 
-def save_pipeline_duration(rows: list[dict[str, str]], output_dir: Path) -> None:
-    ordered = list(reversed(rows))
-    labels = [f"#{row['run_number']}\n{short_sha(row['commit_sha'])}" for row in ordered]
-    values = [as_float(row["workflow_duration"]) for row in ordered]
-    colors = ["#2a9d8f" if row["status"] == "success" else "#e76f51" for row in ordered]
+def plot_pipeline_duration(run_summary: pd.DataFrame, charts_dir: Path) -> None:
+    if run_summary.empty:
+        return
 
-    plt.figure(figsize=(13, 6))
-    plt.bar(labels, values, color=colors)
-    plt.ylabel("Duracao total (s)")
-    plt.xlabel("Execucao")
-    plt.title("Tempo total do pipeline por execucao")
+    df = run_summary.sort_values("timestamp")
+    labels = df["run_number"].astype(str)
+    colors = [STATUS_COLORS.get(status, "#4f6f9f") for status in df["status"]]
+
+    plt.figure(figsize=(10, 5))
+    plt.bar(labels, df["workflow_duration"], color=colors)
+    plt.title("Pipeline duration by run")
+    plt.xlabel("Workflow run number")
+    plt.ylabel("Duration (seconds)")
     plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    plt.savefig(output_dir / "pipeline_duration_by_run.png", dpi=160)
-    plt.close()
+    save_figure(charts_dir / "pipeline_duration_by_run.png")
 
 
-def save_job_duration(rows: list[dict[str, str]], output_dir: Path) -> None:
-    grouped: dict[str, list[float]] = defaultdict(list)
-    for row in rows:
-        grouped[row["job_name"]].append(as_float(row["job_duration"]))
+def plot_job_duration(metrics: pd.DataFrame, charts_dir: Path) -> None:
+    if metrics.empty:
+        return
 
-    names = sorted(grouped)
-    averages = [sum(grouped[name]) / len(grouped[name]) for name in names]
+    df = metrics.groupby("job_name", as_index=False)["job_duration"].mean()
+    df = df.sort_values("job_duration", ascending=False)
 
-    plt.figure(figsize=(12, 6))
-    plt.barh(names, averages, color="#457b9d")
-    plt.xlabel("Duracao media (s)")
-    plt.title("Tempo medio por job")
-    plt.tight_layout()
-    plt.savefig(output_dir / "average_duration_by_job.png", dpi=160)
-    plt.close()
+    plt.figure(figsize=(9, 5))
+    plt.barh(df["job_name"], df["job_duration"], color="#2f7d6d")
+    plt.title("Average duration by job")
+    plt.xlabel("Duration (seconds)")
+    plt.gca().invert_yaxis()
+    save_figure(charts_dir / "average_duration_by_job.png")
 
 
-def save_status_rate(rows: list[dict[str, str]], output_dir: Path) -> None:
-    counts = Counter(row["status"] for row in rows)
-    labels = list(counts)
-    values = [counts[label] for label in labels]
-    colors = ["#2a9d8f" if label == "success" else "#e76f51" for label in labels]
+def plot_success_failure_rate(run_summary: pd.DataFrame, charts_dir: Path) -> None:
+    if run_summary.empty:
+        return
 
-    plt.figure(figsize=(8, 6))
-    plt.bar(labels, values, color=colors)
-    plt.ylabel("Quantidade de execucoes")
-    plt.title("Taxa de sucesso e falha")
-    for index, value in enumerate(values):
-        plt.text(index, value + 0.05, str(value), ha="center")
-    plt.tight_layout()
-    plt.savefig(output_dir / "success_failure_rate.png", dpi=160)
-    plt.close()
+    counts = run_summary["status"].value_counts().sort_index()
+    colors = [STATUS_COLORS.get(status, "#4f6f9f") for status in counts.index]
+
+    plt.figure(figsize=(7, 5))
+    plt.bar(counts.index, counts.values, color=colors)
+    plt.title("Success and failure rate")
+    plt.xlabel("Status")
+    plt.ylabel("Runs")
+    save_figure(charts_dir / "success_failure_rate.png")
 
 
-def save_tests_vs_duration(rows: list[dict[str, str]], output_dir: Path) -> None:
-    test_counts = [as_float(row["test_count"]) for row in rows]
-    durations = [as_float(row["workflow_duration"]) for row in rows]
-    colors = ["#2a9d8f" if row["status"] == "success" else "#e76f51" for row in rows]
-    label_counts: dict[tuple[float, float], int] = defaultdict(int)
-    label_offsets = [(6, 6), (6, 20), (6, -14), (-34, 6)]
+def plot_tests_vs_duration(run_summary: pd.DataFrame, charts_dir: Path) -> None:
+    if run_summary.empty:
+        return
+
+    plt.figure(figsize=(8, 5))
+    colors = [STATUS_COLORS.get(status, "#4f6f9f") for status in run_summary["status"]]
+    plt.scatter(run_summary["test_count"], run_summary["workflow_duration"], c=colors, s=90)
+    plt.title("Tests count vs pipeline duration")
+    plt.xlabel("Tests executed")
+    plt.ylabel("Pipeline duration (seconds)")
+    save_figure(charts_dir / "tests_vs_pipeline_duration.png")
+
+
+def plot_slowest_steps(steps: pd.DataFrame, charts_dir: Path) -> None:
+    if steps.empty:
+        return
+
+    df = steps.sort_values("step_duration", ascending=False).head(10)
+    labels = df["job_name"].astype(str) + " / " + df["step_name"].astype(str)
 
     plt.figure(figsize=(10, 6))
-    plt.scatter(test_counts, durations, c=colors, s=90, alpha=0.85, edgecolors="#1d1d1d")
-    plt.xlabel("Quantidade de testes")
-    plt.ylabel("Duracao total do pipeline (s)")
-    plt.title("Relacao entre quantidade de testes e duracao do pipeline")
-    for row, x_value, y_value in zip(rows, test_counts, durations, strict=False):
-        key = (x_value, y_value)
-        offset = label_offsets[label_counts[key] % len(label_offsets)]
-        label_counts[key] += 1
-        plt.annotate(f"#{row['run_number']}", (x_value, y_value), textcoords="offset points", xytext=offset)
-    plt.margins(x=0.08, y=0.12)
-    plt.tight_layout()
-    plt.savefig(output_dir / "tests_vs_pipeline_duration.png", dpi=160)
-    plt.close()
-
-
-def save_step_duration(rows: list[dict[str, str]], output_dir: Path) -> None:
-    grouped: dict[str, list[float]] = defaultdict(list)
-    for row in rows:
-        name = f"{row['job_name']} / {row['step_name']}"
-        duration = as_float(row["step_duration"])
-        if duration > 0:
-            grouped[name].append(duration)
-
-    averages = sorted(
-        ((sum(values) / len(values), name) for name, values in grouped.items()),
-        reverse=True,
-    )[:12]
-
-    plt.figure(figsize=(12, 7))
-    plt.barh([name for _, name in averages], [value for value, _ in averages], color="#8d99ae")
-    plt.xlabel("Duracao media (s)")
-    plt.title("Etapas mais caras do pipeline")
+    plt.barh(labels, df["step_duration"], color="#6b5dd3")
+    plt.title("Slowest workflow steps")
+    plt.xlabel("Duration (seconds)")
     plt.gca().invert_yaxis()
-    plt.tight_layout()
-    plt.savefig(output_dir / "slowest_steps.png", dpi=160)
-    plt.close()
+    save_figure(charts_dir / "slowest_steps.png")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate charts for CI/CD metrics.")
-    parser.add_argument("--input", type=Path, default=Path("data/run_summary.csv"))
-    parser.add_argument("--jobs", type=Path, default=Path("data/metrics.csv"))
-    parser.add_argument("--steps", type=Path, default=Path("data/steps.csv"))
-    parser.add_argument("--output-dir", type=Path, default=Path("charts"))
-    args = parser.parse_args()
+    args = parse_args()
+    metrics = read_csv(args.data_dir / "metrics.csv")
+    run_summary = read_csv(args.data_dir / "run_summary.csv")
+    steps = read_csv(args.data_dir / "steps.csv")
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    run_rows = read_csv(args.input)
-    job_rows = read_csv(args.jobs)
-    step_rows = read_csv(args.steps)
+    if metrics.empty and run_summary.empty and steps.empty:
+        raise SystemExit("No data found. Run collect_github_metrics.py first.")
 
-    save_pipeline_duration(run_rows, args.output_dir)
-    save_job_duration(job_rows, args.output_dir)
-    save_status_rate(run_rows, args.output_dir)
-    save_tests_vs_duration(run_rows, args.output_dir)
-    save_step_duration(step_rows, args.output_dir)
-    print(f"Charts written to {args.output_dir}")
+    plot_pipeline_duration(run_summary, args.charts_dir)
+    plot_job_duration(metrics, args.charts_dir)
+    plot_success_failure_rate(run_summary, args.charts_dir)
+    plot_tests_vs_duration(run_summary, args.charts_dir)
+    plot_slowest_steps(steps, args.charts_dir)
 
 
 if __name__ == "__main__":
     main()
+
