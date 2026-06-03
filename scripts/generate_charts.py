@@ -79,6 +79,8 @@ def save_tests_vs_duration(rows: list[dict[str, str]], output_dir: Path) -> None
     test_counts = [as_float(row["test_count"]) for row in rows]
     durations = [as_float(row["workflow_duration"]) for row in rows]
     colors = ["#2a9d8f" if row["status"] == "success" else "#e76f51" for row in rows]
+    label_counts: dict[tuple[float, float], int] = defaultdict(int)
+    label_offsets = [(6, 6), (6, 20), (6, -14), (-34, 6)]
 
     plt.figure(figsize=(10, 6))
     plt.scatter(test_counts, durations, c=colors, s=90, alpha=0.85, edgecolors="#1d1d1d")
@@ -86,7 +88,11 @@ def save_tests_vs_duration(rows: list[dict[str, str]], output_dir: Path) -> None
     plt.ylabel("Duracao total do pipeline (s)")
     plt.title("Relacao entre quantidade de testes e duracao do pipeline")
     for row, x_value, y_value in zip(rows, test_counts, durations, strict=False):
-        plt.annotate(f"#{row['run_number']}", (x_value, y_value), textcoords="offset points", xytext=(6, 6))
+        key = (x_value, y_value)
+        offset = label_offsets[label_counts[key] % len(label_offsets)]
+        label_counts[key] += 1
+        plt.annotate(f"#{row['run_number']}", (x_value, y_value), textcoords="offset points", xytext=offset)
+    plt.margins(x=0.08, y=0.12)
     plt.tight_layout()
     plt.savefig(output_dir / "tests_vs_pipeline_duration.png", dpi=160)
     plt.close()

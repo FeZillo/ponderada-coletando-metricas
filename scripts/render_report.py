@@ -180,11 +180,11 @@ O maior peso medio ficou em `{job_averages[0][1]}`. Observando as etapas, os mai
 
 ### Houve diferenca significativa entre execucoes com e sem cache?
 
-Sim. As execucoes com `cache_version` novo sofreram o custo de cache miss e do atraso controlado de instalacao, enquanto as repeticoes com a mesma chave reduziram esse trecho. O efeito e visivel principalmente nas etapas `Cache pip packages`, `Simulate dependency download on cache miss` e `Install dependencies`.
+Houve diferenca clara nas etapas de setup, mas o impacto no tempo total foi moderado. A execucao `cache-invalidado` registrou a etapa `Simulate dependency download on cache miss`, enquanto `cache-v2-aquecido` pulou essa etapa. Mesmo assim, o tempo total mudou pouco porque os jobs rodam em paralelo e tambem existe variabilidade natural dos runners.
 
 ### O paralelismo reduziu o tempo total? Em que condicoes?
 
-O paralelismo foi vantajoso nas execucoes com muitos testes ou testes lentos, pois o tempo de Pytest foi dividido entre shards. Em execucoes pequenas, o ganho foi limitado pelo overhead de iniciar mais jobs, baixar cache e instalar dependencias em cada shard.
+Nos dados observados, o paralelismo nao reduziu o tempo total de forma convincente. As execucoes com 2 e 3 shards ficaram proximas de 33s, pois cada shard repetiu checkout, setup, cache e instalacao de dependencias. A conclusao e que o paralelismo so compensaria melhor se a etapa de testes fosse substancialmente mais longa que o overhead de criar jobs adicionais.
 
 ### Quais falhas foram mais frequentes?
 
@@ -204,12 +204,12 @@ Para o projeto pequeno, sim: a duracao media ficou em {avg_duration:.1f}s. Ainda
 
 ### Resultados inesperados
 
-1. O paralelismo nem sempre reduziu a duracao total. Em cargas pequenas, o overhead de jobs adicionais competiu com o ganho de dividir testes.
-2. O cache nao eliminou todo o custo de setup. Mesmo com cache hit, ainda existe tempo de restauracao, verificacao e execucao do `pip install`, entao a diferenca aparece mais claramente quando o cache miss e acompanhado por dependencias ou atrasos maiores.
+1. O paralelismo nao reduziu a duracao total neste recorte. O overhead de jobs adicionais competiu com o ganho de dividir testes, especialmente porque cada shard reinstalou dependencias.
+2. O cache nao eliminou todo o custo de setup. Mesmo com cache hit, ainda existe tempo de restauracao, verificacao e execucao do `pip install`, entao a diferenca apareceu mais nas etapas individuais do que no tempo total do workflow.
 
 ### Comparacao entre hipotese e resultado observado
 
-A hipotese foi parcialmente confirmada. Os testes dominaram quando a carga foi ampliada ou desacelerada, mas em execucoes pequenas o setup teve peso proporcionalmente maior. O paralelismo ajudou nas cargas maiores, mas nao foi uma melhoria universal.
+A hipotese foi apenas parcialmente confirmada. Os testes cresceram quando a carga foi ampliada ou desacelerada, mas o setup e a instalacao de dependencias continuaram com peso alto. A parte sobre paralelismo foi refutada para este experimento: dividir testes em shards nao bastou para reduzir o tempo total porque o custo fixo por job ficou alto demais.
 
 ### Limitacoes dos dados
 

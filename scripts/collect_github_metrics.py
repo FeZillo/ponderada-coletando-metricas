@@ -15,6 +15,9 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import requests
+from requests import HTTPError as RequestsHTTPError
+
 API_ROOT = "https://api.github.com"
 
 
@@ -27,10 +30,20 @@ class GitHubClient:
             return json.loads(response.read().decode("utf-8"))
 
     def request_bytes(self, url: str) -> bytes:
-        with urlopen(self._request(url)) as response:
-            return response.read()
+        response = requests.get(url, headers=self._headers(), allow_redirects=False, timeout=30)
+        response.raise_for_status()
+
+        redirect_url = response.headers.get("Location")
+        if redirect_url:
+            response = requests.get(redirect_url, timeout=60)
+            response.raise_for_status()
+
+        return response.content
 
     def _request(self, url: str) -> Request:
+        return Request(url, headers=self._headers())
+
+    def _headers(self) -> dict[str, str]:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
@@ -38,7 +51,7 @@ class GitHubClient:
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        return Request(url, headers=headers)
+        return headers
 
 
 def iso_to_datetime(value: str | None) -> datetime | None:
@@ -104,7 +117,7 @@ def download_test_artifacts(client: GitHubClient, repo: str, run_id: int) -> lis
             continue
         try:
             archive = client.request_bytes(artifact["archive_download_url"])
-        except HTTPError:
+        except (HTTPError, RequestsHTTPError):
             continue
         with zipfile.ZipFile(BytesIO(archive)) as zipped:
             for member in zipped.namelist():
